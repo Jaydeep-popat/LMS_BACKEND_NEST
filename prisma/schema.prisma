@@ -1,0 +1,160 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String      @id @default(cuid())
+  name         String
+  email        String      @unique
+  password     String
+  role         UserRole
+  isActive     Boolean     @default(true)
+  isVerified   Boolean     @default(false)
+  otp          String?
+  otpExpiry    DateTime?
+  refreshToken String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  
+  loans        Loan[]
+  fines        Fine[]
+  reservations Reservation[]
+  transactions Transaction[]
+  WaivedFines  Fine[]      @relation("FineWaivedBy")
+
+  @@index([name])
+}
+
+model LibraryItem {
+  id           String      @id @default(cuid())
+  uniqueItemId String      @unique
+  title        String
+  author       String
+  genre        Genre
+  status       ItemStatus  @default(AVAILABLE)
+  isArchived   Boolean     @default(false)
+  publishedAt  DateTime
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  loans        Loan[]
+  reservations Reservation[]
+
+  @@index([title])
+}
+
+model Loan {
+  id           String     @id @default(cuid())
+  user         User       @relation(fields: [userId], references: [id])
+  userId       String
+  item         LibraryItem @relation(fields: [itemId], references: [id])
+  itemId       String
+  loanDate     DateTime   @default(now())
+  dueDate      DateTime
+  returnDate   DateTime?
+  renewalCount Int        @default(0)
+  fines        Fine[]     // Changed from fine: Fine? to fines: Fine[]
+
+  @@index([userId])
+  @@index([dueDate])
+  @@index([returnDate])
+}
+
+model Fine {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  loan       Loan?    @relation(fields: [loanId], references: [id])
+  loanId     String?  // Multiple fines per loan allowed
+  amount     Decimal  @db.Decimal(10, 2)
+  status     FineStatus @default(PENDING)
+  reason     String?
+  waivedBy   User?    @relation("FineWaivedBy", fields: [waivedById], references: [id])
+  waivedById String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Reservation {
+  id            String       @id @default(cuid())
+  user          User         @relation(fields: [userId], references: [id])
+  userId        String
+  item          LibraryItem  @relation(fields: [itemId], references: [id])
+  itemId        String
+  reservedAt    DateTime     @default(now())
+  expiresAt     DateTime
+  isFulfilled   Boolean      @default(false)
+
+  @@index([userId])
+  @@index([itemId])
+}
+
+model LibrarySettings {
+  id              String   @id @default(cuid())   // 🔹 Instead of enforcing "1", just use cuid()
+  loanDurationDays Int     @default(14)
+  overdueFinePerDay Decimal @db.Decimal(5, 2) @default(1.00)
+  maxBooksPerUser Int      @default(5)
+  updatedAt       DateTime @updatedAt
+}
+
+model Transaction {
+  id         String        @id @default(cuid())
+  user       User          @relation(fields: [userId], references: [id])
+  userId     String
+  action     ActivityType
+  details    String?
+  createdAt  DateTime      @default(now())
+
+  @@index([userId])
+}
+
+enum UserRole {
+  STUDENT
+  TEACHER
+  LIBRARIAN
+  ADMIN
+}
+
+enum ItemStatus {
+  AVAILABLE
+  BORROWED
+  RESERVED
+  LOST
+  DAMAGED
+}
+
+enum FineStatus {
+  PENDING
+  PAID
+  WAIVED
+}
+
+// 🔹 New improved enums
+enum Genre {
+  FICTION
+  NON_FICTION
+  SCIENCE
+  HISTORY
+  TECHNOLOGY
+  ART
+  OTHER
+}
+
+enum ActivityType {
+  LOAN_CREATED
+  LOAN_RETURNED
+  LOAN_RENEWED
+  RESERVATION_PLACED
+  RESERVATION_CANCELLED
+  FINE_APPLIED
+  FINE_PAID
+  FINE_WAIVED
+  USER_SUSPENDED
+  USER_ACTIVATED
+}
