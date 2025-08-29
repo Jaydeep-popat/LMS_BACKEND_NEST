@@ -7,8 +7,11 @@ import { PrismaService } from '../../prisma.service';
 export class ActivitiesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(createActivityDto: CreateActivityDto) {
-    return this.prisma.transaction.create({ data: createActivityDto });
+  create(createActivityDto: CreateActivityDto, userId?: string) {
+    const data = userId 
+      ? { ...createActivityDto, userId, action: createActivityDto.action as any }
+      : { ...createActivityDto, action: createActivityDto.action as any };
+    return this.prisma.transaction.create({ data });
   }
 
   findAll(params?: { userId?: string; action?: string; from?: Date; to?: Date }) {

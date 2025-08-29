@@ -12,6 +12,7 @@ import { CreateLoanDto } from './dto/create-loan.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UserRole } from '../common/enums';
 
 @Controller('loan')
@@ -36,6 +37,13 @@ export class LoanController {
   @Roles(UserRole.LIBRARIAN, UserRole.ADMIN)
   renew(@Param('id') id: string) {
     return this.loanService.renew(id);
+  }
+
+  @Get('my-loans')
+  @UseGuards(JwtAuthGuard)
+  async getMyLoans(@CurrentUser() user: any) {
+    const loans = await this.loanService.getUserLoans(user.sub);
+    return { message: 'Your loans fetched successfully', data: loans };
   }
 
   @Get('all')
@@ -85,5 +93,24 @@ export class LoanController {
   @Roles(UserRole.LIBRARIAN, UserRole.ADMIN)
   async sendOverdueNotifications() {
     return this.loanService.sendOverdueNotifications();
+  }
+
+  @Post(':loanId/request-return')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.STUDENT, UserRole.TEACHER)
+  async requestReturn(
+    @Param('loanId') loanId: string,
+    @CurrentUser() user: any,
+  ) {
+    const loan = await this.loanService.requestReturn(loanId, user.sub);
+    return { message: 'Return requested successfully', data: loan };
+  }
+
+  @Post(':loanId/confirm-return')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.LIBRARIAN, UserRole.ADMIN)
+  async confirmReturn(@Param('loanId') loanId: string) {
+    const loan = await this.loanService.confirmReturn(loanId);
+    return { message: 'Return confirmed successfully', data: loan };
   }
 }

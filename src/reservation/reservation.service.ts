@@ -70,7 +70,7 @@ export class ReservationService {
     return this.prisma.reservation.findMany({
       include: {
         user: { select: { id: true, name: true, email: true } },
-        item: { select: { id: true, title: true, author: true } },
+        item: { select: { id: true, title: true } },
       },
       orderBy: { reservedAt: 'desc' },
     });
@@ -80,7 +80,7 @@ export class ReservationService {
     return this.prisma.reservation.findMany({
       where: { userId },
       include: {
-        item: { select: { id: true, title: true, author: true, status: true } },
+        item: { select: { id: true, title: true, status: true } },
       },
       orderBy: { reservedAt: 'desc' },
     });

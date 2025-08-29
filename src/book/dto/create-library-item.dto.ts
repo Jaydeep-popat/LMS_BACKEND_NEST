@@ -1,7 +1,7 @@
 import { IsDateString, IsEnum, IsString, MinLength, IsOptional, IsObject } from 'class-validator';
-import { ItemType, Genre } from '../../common/enums';
+import { ItemType } from '../../common/enums';
 
-export class CreateBookDto {
+export class CreateLibraryItemDto {
   @IsString()
   @MinLength(1)
   title: string;
@@ -34,12 +34,5 @@ export class CreateBookDto {
   location?: string;
 
   @IsObject()
-  metadata: {
-    author?: string;
-    genre?: Genre;
-    pages?: number;
-    publisher?: string;
-    edition?: string;
-    [key: string]: any; // Allow additional metadata fields
-  };
+  metadata: Record<string, any>;
 }

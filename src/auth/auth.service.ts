@@ -11,6 +11,8 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtService } from '@nestjs/jwt';
+import { TransactionService } from '../common/transaction.service';
+import { ActivityType } from '../common/enums';
 import * as bcrypt from 'bcrypt';
 import { MailerService } from './mailer.service';
 
@@ -20,6 +22,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly mailer: MailerService,
+    private readonly transactionService: TransactionService,
   ) {}
 
   private generateOtp(): string {
@@ -103,13 +106,20 @@ export class AuthService {
       where: { id: user.id },
       data: { refreshToken },
     });
-    
+
+    // Log successful login
+    await this.transactionService.logActivity(
+      user.id,
+      ActivityType.USER_ACTIVATED,
+      `User logged in successfully`
+    );
+
     // Remove sensitive information from user object
     const { password, otp, otpExpiry, refreshToken: _, ...userInfo } = user;
     return {
       user: userInfo,
       accessToken,
-      refreshToken
+      refreshToken,
     };
   }
 
@@ -138,7 +148,6 @@ export class AuthService {
     if (user.otp !== dto.otp) throw new BadRequestException('Invalid OTP');
     if (new Date() > user.otpExpiry)
       throw new BadRequestException('OTP expired');
-
     const passwordHash = await bcrypt.hash(dto.newPassword, 10);
     await this.prisma.user.update({
       where: { id: user.id },
@@ -156,11 +165,11 @@ export class AuthService {
       const payload = await this.jwt.verifyAsync(dto.refreshToken, {
         secret: process.env.JWT_REFRESH_SECRET,
       });
-      
+
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
       });
-      
+
       if (!user || user.refreshToken !== dto.refreshToken) {
         throw new UnauthorizedException('Invalid refresh token');
       }
@@ -170,12 +179,12 @@ export class AuthService {
         email: user.email,
         role: user.role as any,
       });
-      
+
       await this.prisma.user.update({
         where: { id: user.id },
         data: { refreshToken: tokens.refreshToken },
       });
-      
+
       return tokens;
     } catch (error) {
       throw new UnauthorizedException('Invalid refresh token');
@@ -203,7 +212,7 @@ export class AuthService {
     } catch (error) {
       // Ignore verification errors during logout
     }
-    
+
     return { message: 'Logged out' };
   }
 }

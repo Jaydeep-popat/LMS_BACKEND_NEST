@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma.service';
 import { CreateLoanDto } from './dto/create-loan.dto';
 import { UpdateLoanDto } from './dto/update-loan.dto';
-import { ItemStatus } from '../common/enums';
+import { ItemStatus, ActivityType, LoanStatus } from '../common/enums';
 import { MailerService } from '../auth/mailer.service';
 import { ReservationService } from '../reservation/reservation.service';
+import { TransactionService } from '../common/transaction.service';
 
 @Injectable()
 export class LoanService {
@@ -12,6 +13,7 @@ export class LoanService {
     private readonly prisma: PrismaService,
     private readonly mailer: MailerService,
     private readonly reservationService: ReservationService,
+    private readonly transactionService: TransactionService,
   ) {}
 
   async borrow(createLoanDto: CreateLoanDto) {
@@ -27,17 +29,13 @@ export class LoanService {
     const due = new Date(now);
     due.setDate(due.getDate() + 14);
 
-    return this.prisma.$transaction(async (tx) => {
-      const loan = await tx.loan.create({
+    const loanIdCreated = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.loan.create({
         data: {
           userId,
           itemId,
           loanDate: now,
           dueDate: due,
-        },
-        include: {
-          user: true,
-          item: true,
         },
       });
 
@@ -46,24 +44,31 @@ export class LoanService {
         data: { status: 'BORROWED' },
       });
 
-      await tx.transaction.create({
-        data: {
-          userId,
-          action: 'LOAN_CREATED',
-          details: `Loan ${loan.id} created for item ${itemId}`,
-        },
-      });
+      return created.id;
+    });
 
-      // Send email notification
+    // Fetch full loan with relations AFTER commit for notifications
+    const loan = await this.prisma.loan.findUnique({
+      where: { id: loanIdCreated },
+      include: { user: true, item: true },
+    });
+
+    if (loan) {
+      await this.transactionService.logActivity(
+        userId,
+        ActivityType.LOAN_CREATED,
+        `Borrowed "${item.title}" (ID: ${itemId})`
+      );
+
       await this.mailer.sendLoanEmail(
         loan.user.email,
         loan.user.name,
         loan.item.title,
         loan.dueDate,
       );
+    }
 
-      return loan;
-    });
+    return loan as any;
   }
 
   async return(loanId: string) {
@@ -73,42 +78,111 @@ export class LoanService {
     });
     if (!existing) throw new NotFoundException('Loan not found');
 
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.loan.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.loan.update({
         where: { id: loanId },
-        data: { returnDate: new Date() },
-        include: { user: true, item: true },
+        data: { returnDate: new Date(), status: 'RETURNED' } as any,
       });
 
       await tx.libraryItem.update({
-        where: { id: updated.itemId },
+        where: { id: existing.itemId },
         data: { status: 'AVAILABLE' },
       });
+    });
 
-      await tx.transaction.create({
-        data: {
-          userId: existing.userId,
-          action: 'LOAN_RETURNED',
-          details: `Loan ${loanId} returned for item ${updated.itemId}`,
-        },
-      });
+    const updated = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: { user: true, item: true },
+    });
 
-      // Send email notification
+    if (updated) {
+      await this.transactionService.logActivity(
+        existing.userId,
+        ActivityType.LOAN_RETURNED,
+        `Returned "${existing.item.title}" (ID: ${updated.itemId})`
+      );
+
       await this.mailer.sendReturnEmail(
         updated.user.email,
         updated.user.name,
         updated.item.title,
       );
 
-      // Check for pending reservations
       await this.reservationService.checkAndFulfillReservations(updated.itemId);
+    }
 
-      return updated;
+    return updated as any;
+  }
+
+  async requestReturn(loanId: string, userId: string) {
+    const loan = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: { item: true, user: true },
     });
+    if (!loan) throw new NotFoundException('Loan not found');
+    if (loan.userId !== userId) throw new ForbiddenException('You can only request return for your own loan');
+    if (loan.returnDate || (loan as any).status === 'RETURNED') throw new BadRequestException('Loan already returned');
+    if ((loan as any).status === 'PENDING_RETURN') throw new BadRequestException('Return already requested');
+
+    const updated = await this.prisma.loan.update({
+      where: { id: loanId },
+      data: { status: LoanStatus.PENDING_RETURN } as any,
+      include: { item: true, user: true },
+    });
+
+    return updated;
+  }
+
+  async confirmReturn(loanId: string) {
+    const loan = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: { item: true, user: true },
+    });
+    if (!loan) throw new NotFoundException('Loan not found');
+    if (loan.returnDate || (loan as any).status === 'RETURNED') throw new BadRequestException('Loan already returned');
+    if ((loan as any).status !== 'PENDING_RETURN') throw new BadRequestException('Return must be requested before confirmation');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.loan.update({
+        where: { id: loanId },
+        data: { returnDate: new Date(), status: 'RETURNED' } as any,
+      });
+
+      await tx.libraryItem.update({
+        where: { id: loan.itemId },
+        data: { status: 'AVAILABLE' },
+      });
+    });
+
+    const updated = await this.prisma.loan.findUnique({
+      where: { id: loanId },
+      include: { user: true, item: true },
+    });
+
+    if (updated) {
+      await this.transactionService.logActivity(
+        loan.userId,
+        ActivityType.LOAN_RETURNED,
+        `Returned "${loan.item.title}" (ID: ${updated.itemId})`
+      );
+
+      await this.mailer.sendReturnEmail(
+        updated.user.email,
+        updated.user.name,
+        updated.item.title,
+      );
+
+      await this.reservationService.checkAndFulfillReservations(updated.itemId);
+    }
+
+    return updated as any;
   }
 
   async renew(loanId: string) {
-    const existing = await this.prisma.loan.findUnique({ where: { id: loanId } });
+    const existing = await this.prisma.loan.findUnique({ 
+      where: { id: loanId },
+      include: { item: true, user: true }
+    });
     if (!existing) throw new NotFoundException('Loan not found');
     if (existing.returnDate) throw new BadRequestException('Cannot renew a returned loan');
 
@@ -120,13 +194,12 @@ export class LoanService {
       data: { dueDate: newDue, renewalCount: (existing.renewalCount ?? 0) + 1 },
     });
 
-    await this.prisma.transaction.create({
-      data: {
-        userId: existing.userId,
-        action: 'LOAN_RENEWED',
-        details: `Loan ${loanId} renewed, due ${newDue.toISOString()}`,
-      },
-    });
+    // Log transaction
+    await this.transactionService.logActivity(
+      existing.userId,
+      ActivityType.LOAN_RENEWED,
+      `Renewed "${existing.item.title}" - New due date: ${newDue.toDateString()}`
+    );
 
     return updated;
   }

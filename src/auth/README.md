@@ -45,7 +45,7 @@ getCurrentUser(@CurrentUser() user: any) {
 ## API Endpoints with Role Restrictions
 
 ### Books
-- **GET /book** - Public (anyone can view books)
+- **GET /book** - Public (anyone can view books)  
 - **POST /book** - LIBRARIAN, ADMIN only
 - **PATCH /book/:id** - LIBRARIAN, ADMIN only  
 - **DELETE /book/:id** - LIBRARIAN, ADMIN only

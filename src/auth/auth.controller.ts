@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Get, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Get, UseGuards, Res } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -8,6 +8,8 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
+import { Response } from 'express';
+import { parseDurationMs } from './utils/parse-duration';
 
 @Controller('auth')
 export class AuthController {
@@ -24,8 +26,26 @@ export class AuthController {
   }
 
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    const { user, accessToken, refreshToken } = await this.authService.login(dto);
+
+    const isProd = process.env.NODE_ENV === 'production';
+    const cookieBase = {
+      httpOnly: true,
+      sameSite: isProd ? 'none' as const : 'lax' as const,
+      secure: isProd,
+      path: '/',
+    };
+
+    // Access token cookie (short lived)
+    const accessMaxAgeMs = parseDurationMs(process.env.JWT_ACCESS_EXPIRES_IN) ?? 15 * 60 * 1000;
+    res.cookie('accessToken', accessToken, { ...cookieBase, maxAge: accessMaxAgeMs });
+
+    // Refresh token cookie (longer lived)
+    const refreshMaxAgeMs = parseDurationMs(process.env.JWT_REFRESH_EXPIRES_IN) ?? 7 * 24 * 60 * 60 * 1000;
+    res.cookie('refreshToken', refreshToken, { ...cookieBase, maxAge: refreshMaxAgeMs });
+
+    return { user };
   }
 
   @Post('forgot-password')
@@ -44,7 +64,10 @@ export class AuthController {
   }
 
   @Post('logout')
-  logout(@Body() dto: RefreshTokenDto) {
+  async logout(@Body() dto: RefreshTokenDto, @Res({ passthrough: true }) res: Response) {
+    // Clear cookies regardless of token state
+    res.clearCookie('accessToken', { path: '/' });
+    res.clearCookie('refreshToken', { path: '/' });
     return this.authService.logout(dto);
   }
 

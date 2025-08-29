@@ -13,6 +13,7 @@ import { FinesModule } from './fines/fines.module';
 
 @Module({
   imports: [
+    PrismaModule,
     UserModule, 
     BookModule, 
     LibrarySettingsModule, 
