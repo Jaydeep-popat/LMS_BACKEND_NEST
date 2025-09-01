@@ -45,7 +45,8 @@ export class AuthController {
     const refreshMaxAgeMs = parseDurationMs(process.env.JWT_REFRESH_EXPIRES_IN) ?? 7 * 24 * 60 * 60 * 1000;
     res.cookie('refreshToken', refreshToken, { ...cookieBase, maxAge: refreshMaxAgeMs });
 
-    return { user };
+    // Return both user and tokens for NextAuth compatibility
+    return { user, accessToken, refreshToken };
   }
 
   @Post('forgot-password')

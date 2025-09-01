@@ -4,7 +4,7 @@ import { UpdateBookDto } from './dto/update-book.dto';
 import { CreateLibraryItemDto } from './dto/create-library-item.dto';
 import { UpdateLibraryItemDto } from './dto/update-library-item.dto';
 import { CreateBookSpecificDto, CreateDVDDto, CreateEquipmentDto } from './dto/create-specific-items.dto';
-import { PrismaService } from '../../prisma.service';
+import { PrismaService } from '../prisma.service';
 import { TransactionService } from '../common/transaction.service';
 import { randomUUID } from 'crypto';
 import { ItemType, ActivityType } from '../common/enums';

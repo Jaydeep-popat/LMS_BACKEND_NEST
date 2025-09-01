@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ConflictException, Logger } from '@nestjs/common';
 import { CreateLibrarySettingDto } from './dto/create-library-setting.dto';
 import { UpdateLibrarySettingDto } from './dto/update-library-setting.dto';
-import { PrismaService } from '../../prisma.service';
+import { PrismaService } from '../prisma.service';
 import { TransactionService } from '../common/transaction.service';
 import { ActivityType } from '../common/enums';
 
